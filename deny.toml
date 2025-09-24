@@ -1,0 +1,18 @@
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-3.0",         # Unicode License (unicode-ident crate)
+    "ISC",                 # ISC License (ring, rustls-webpki, untrusted) - OSI approved
+    "BSD-3-Clause",        # BSD 3-Clause License (subtle) - OSI approved
+    "CDLA-Permissive-2.0", # Community Data License Agreement (webpki-roots)
+]
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+unknown-registry = "deny"
+unknown-git = "deny"
