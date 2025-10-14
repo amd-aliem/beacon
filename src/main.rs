@@ -44,6 +44,10 @@ enum Commands {
         /// Assignees for the GitHub issue (can be specified multiple times)
         #[arg(short, long, action = clap::ArgAction::Append)]
         assignee: Vec<String>,
+
+        /// Milestone for the GitHub issue
+        #[arg(short, long)]
+        milestone: Option<String>,
     },
 }
 
@@ -64,6 +68,7 @@ impl TryFrom<Cli> for Action {
                 body,
                 label,
                 assignee,
+                milestone,
             } => Ok(Action::Report(Report {
                 title,
                 body: body
@@ -71,6 +76,7 @@ impl TryFrom<Cli> for Action {
                     .unwrap_or_else(|| std::io::read_to_string(std::io::stdin().lock()))?,
                 labels: label,
                 assignees: assignee,
+                milestone,
             })),
         }
     }
@@ -112,6 +118,9 @@ pub struct Report {
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     assignees: Vec<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    milestone: Option<String>,
 }
 
 const RESOLVER_TIMEOUT: Duration = Duration::from_secs(5);
