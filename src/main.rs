@@ -1,7 +1,9 @@
 pub mod avahi;
 pub mod uefi;
 
+use std::convert::Infallible;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -44,6 +46,10 @@ enum Commands {
         /// Assignees for the GitHub issue (can be specified multiple times)
         #[arg(short, long, action = clap::ArgAction::Append)]
         assignee: Vec<String>,
+
+        /// Milestone for the GitHub issue
+        #[arg(short, long)]
+        milestone: Option<Milestone>,
     },
 }
 
@@ -64,6 +70,7 @@ impl TryFrom<Cli> for Action {
                 body,
                 label,
                 assignee,
+                milestone,
             } => Ok(Action::Report(Report {
                 title,
                 body: body
@@ -71,6 +78,7 @@ impl TryFrom<Cli> for Action {
                     .unwrap_or_else(|| std::io::read_to_string(std::io::stdin().lock()))?,
                 labels: label,
                 assignees: assignee,
+                milestone,
             })),
         }
     }
@@ -101,6 +109,23 @@ impl Action {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Milestone {
+    Id(u64),
+    Title(String),
+}
+
+impl FromStr for Milestone {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(s.parse::<u64>()
+            .map(Milestone::Id)
+            .unwrap_or_else(|_| Milestone::Title(s.to_string())))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     title: String,
 
@@ -112,6 +137,9 @@ pub struct Report {
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     assignees: Vec<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    milestone: Option<Milestone>,
 }
 
 const RESOLVER_TIMEOUT: Duration = Duration::from_secs(5);
