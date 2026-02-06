@@ -97,11 +97,40 @@ impl Action {
             // means that there is no job or that we need to contact
             // the server on a different address. Skip.
             StatusCode::EXPECTATION_FAILED => Ok(false),
-            StatusCode::OK => Ok(true),
+            StatusCode::OK => {
+                self.fetch_sshkey(url).await;
+                Ok(true)
+            }
             status => {
                 eprintln!("warning: {status}");
                 Ok(false)
             }
+        }
+    }
+
+    async fn fetch_sshkey(&self, url: &str) {
+        if !matches!(self, Action::Boot) {
+            return;
+        }
+
+        // Strip query string from URL before appending /ssh-key
+        let base_url = url.split('?').next().unwrap_or(url);
+        let ssh_key_url = format!("{}/ssh-key", base_url);
+        let response = match Client::new().get(&ssh_key_url).send().await {
+            Ok(r) => r,
+            Err(e) => return eprintln!("warning: failed to fetch SSH key: {}", e),
+        };
+
+        match response.status() {
+            StatusCode::OK => {
+                if let Ok(ssh_key) = response.text().await {
+                    if let Err(e) = install_ssh_key(&ssh_key).await {
+                        eprintln!("warning: failed to install SSH key: {}", e);
+                    }
+                }
+            }
+            StatusCode::NOT_FOUND => {} // No SSH key configured
+            status => eprintln!("warning: SSH key fetch returned {}", status),
         }
     }
 }
@@ -125,6 +154,69 @@ pub struct Report {
 
 const RESOLVER_TIMEOUT: Duration = Duration::from_secs(5);
 const BROWSER_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn install_ssh_key(ssh_key: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use tokio::fs;
+    use tokio::io::AsyncWriteExt;
+
+    // Determine SSH directory (typically /root/.ssh for root user)
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let ssh_dir = std::path::Path::new(&home).join(".ssh");
+    let authorized_keys_path = ssh_dir.join("authorized_keys");
+
+    // Create .ssh directory if it doesn't exist
+    fs::create_dir_all(&ssh_dir).await?;
+
+    // Set permissions on .ssh directory (700)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&ssh_dir).await?.permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&ssh_dir, perms).await?;
+    }
+
+    // Read existing authorized_keys if it exists
+    let existing_keys = fs::read_to_string(&authorized_keys_path)
+        .await
+        .unwrap_or_default();
+
+    // Check if the key already exists
+    if existing_keys
+        .lines()
+        .any(|line| line.trim() == ssh_key.trim())
+    {
+        // Key already exists, no need to add it again
+        return Ok(());
+    }
+
+    // Append the new key
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&authorized_keys_path)
+        .await?;
+
+    // Add newline if file doesn't end with one
+    if !existing_keys.is_empty() && !existing_keys.ends_with('\n') {
+        file.write_all(b"\n").await?;
+    }
+
+    file.write_all(ssh_key.trim().as_bytes()).await?;
+    file.write_all(b"\n").await?;
+    file.flush().await?;
+
+    // Set permissions on authorized_keys (600)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&authorized_keys_path).await?.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&authorized_keys_path, perms).await?;
+    }
+
+    Ok(())
+}
 
 // Avahi D-Bus proxy interfaces
 #[tokio::main]
